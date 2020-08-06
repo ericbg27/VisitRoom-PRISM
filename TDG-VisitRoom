@@ -1,0 +1,109 @@
+mdp
+
+const double relMove;
+const double relAlarm;
+const double pobs;
+
+global finished_request_help : bool init false;
+global finished_visit_room : bool init false;
+global finished_enter_room : bool init false;
+global succeeded : bool init false;
+global failed : bool init false;
+global end : bool init false;
+
+module visit_room
+	
+	m1 : [0..3] init 0;
+	at_r_roomattrdoor1 : bool init false; //attr stands for attribute
+	at_r_roomattrinside1 : bool init false;
+	at_r_loc1 : bool init true;
+
+	[move1_r_loc_roomattrdoor] m1=0 & !at_r_roomattrdoor1 & !at_r_roomattrinside1-> relMove:(m1'=1) & (at_r_loc1'=false) & (at_r_roomattrdoor1'=true) + (1-relMove):(m1'=2);
+	[EnterRoom1_r_room] m1=1 -> (m1'=3);
+	[] m1=2 & !failed -> (m1'=2) & (failed'=true); //fail state
+	[] m1=3 & !finished_visit_room -> (m1'=3) & (finished_visit_room'=true); //finish state
+	
+endmodule
+
+module enter_room
+
+	m2 : [0..9] init 0;
+	obstacle1 : bool init false;
+	at_r_roomattrinside2 : bool init false;
+	at_r_roomattrdoor2 : bool init true;
+	is_probabilistic : bool init true;
+	
+	[EnterRoom1_r_room] m2=0 -> (m2'=1);
+	[Case_enter_room] m2=1 & is_probabilistic -> pobs:(m2'=2) & (obstacle1'=true) + (1-pobs):(m2'=2) & (obstacle1'=false); //Probabilistic Case statement modelling (SHOP2 language)
+	[Case_enter_room] m2=1 & !is_probabilistic -> (m2'=2);
+	[Case1_enter_room] m2=2 & obstacle1 -> (m2'=4);
+	[Case2_enter_room] m2=2 & !obstacle1 -> (m2'=3);
+	[move2_r_roomattrdoor_roomattrinside] m2=3 & at_r_roomattrdoor2 -> relMove:(m2'=8) & (at_r_roomattrinside2'=true) & (at_r_roomattrdoor2'=false) + (1-relMove):(m2'=7);
+	[RequestHelp1_r_roomattrdoor] m2=4 -> (m2'=5);
+	[] m2=5 & finished_request_help -> (m2'=6) & (obstacle1'=false) & (is_probabilistic'=false); //synchronization state
+	[EnterRoom2_r_room] m2=6 -> (m2'=1); //Case statement is not probabilistic anymore (request_help effect is obstacle = false)
+	//[] m2=7 -> (m2'=8) & (succeeded'=true); //mission success state
+	[] m2=7 & !failed -> (m2'=7) & (failed'=true); //fail state
+	[] m2=8 & !finished_enter_room -> (m2'=8) & (finished_enter_room'=true) & (succeeded'=true); //finish state
+	
+	//We know the task VisitRoom will end in an EnterRoom decomposition (That's why TDG may be needed)
+	//TDG will be needed and it will be created assuming everything goes well
+	//In this case this means that RequestHelp will be called once and, if it succeeds, the door will be open when decomposing EnterRoom again
+	//This is due to raise_alarm's effect (obstacle=false)
+
+endmodule
+
+module request_help
+
+	m3 : [0..4] init 0;
+	at_r_roomattrdoor3 : bool init true;
+	
+	[RequestHelp1_r_roomattrdoor] m3=0 & at_r_roomattrdoor3 -> (m3'=1);
+	[raise_alarm1_r_loc] m3=1 -> relAlarm:(m3'=3) + (1-relAlarm):(m3'=2);
+	[] m3=2 & !failed -> (m3'=2) & (failed'=true); //fail state
+	[] m3=3 & !finished_request_help -> (m3'=3) & (finished_request_help'=true); //finish state
+
+endmodule
+
+module success
+
+	s : bool init false;
+
+	m4 : [0..1];
+
+	[success] m4=0 & succeeded -> (m4'=1) & (s'=true);
+	[] m4=1 & !end -> (m4'=1) & (end'=true);
+
+endmodule
+
+module failure
+
+	f : bool init false;
+
+	m5 : [0..1];
+
+	[] m5=0 & failed -> (m5'=1) & (f'=true);
+	[] m5=1 & !end -> (m5'=1) & (end'=true);
+
+endmodule
+
+module end
+
+	m6 : [0..1];
+
+	[] m6=0 & end -> (m6'=1);
+	[] m6=1 -> (m6'=1);
+
+endmodule
+
+formula success = (succeeded);
+formula failure = ((m1=2) | (m2=7) | (m3=2));
+
+const double eval_calcundtime_eval_distance_loc_roomattrdoor_endeval_endeval; //und is for underscore in function name, give that _ is our separator here in PRISM
+const double eval_calcundtime_eval_distance_roomattrdoor_roomattrinside_endeval_endeval; 
+
+rewards "time"
+	[move1_r_loc_roomattrdoor] true : eval_calcundtime_eval_distance_loc_roomattrdoor_endeval_endeval;
+	[move2_r_roomattrdoor_roomattrinside] true : eval_calcundtime_eval_distance_roomattrdoor_roomattrinside_endeval_endeval;
+	[raise_alarm1_r_loc] true : 30;
+endrewards
